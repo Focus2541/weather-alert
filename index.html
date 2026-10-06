@@ -57,6 +57,9 @@ button{cursor:pointer}
 .cond{font-size:1.05rem;font-weight:500}
 .hilo{color:var(--muted);font-size:.92rem}
 
+.obs{display:block;width:100%;text-align:left;margin:6px 0 0;padding:8px 12px;border:1px dashed var(--line);border-radius:12px;background:transparent;font-size:.85rem;color:var(--ink)}
+.obs b{font-family:var(--display);font-size:1rem}
+.obs small{color:var(--muted)}
 .air{margin-top:16px;display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center;background:color-mix(in srgb,var(--aq) 16%,transparent);border-radius:18px;padding:14px}
 .aqi-ring{width:84px;height:84px;border-radius:50%;background:var(--aq);color:var(--aq-ink);display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--display)}
 .aqi-ring b{font-size:1.9rem;line-height:1}
@@ -166,6 +169,7 @@ legend{font-size:.85rem;color:var(--muted);padding:0 6px}
         <div class="hilo" id="hilo"></div>
       </div>
     </div>
+    <button class="obs" id="obs" data-key="obs" hidden></button>
     <button class="air" id="airbox" data-key="aqi" style="width:100%;border:0;text-align:left">
       <div class="aqi-ring"><b id="aqi">--</b><span>AQI</span></div>
       <div>
@@ -266,6 +270,7 @@ const EXPLAIN = {
   rain:'โอกาสที่จะมีฝนตกในชั่วโมงนี้ ตั้งแต่ 60% ขึ้นไปควรพกร่ม',
   uv:'ความแรงของแดดที่ทำร้ายผิว (0–11+) ตั้งแต่ 6 ขึ้นไปควรทาครีมกันแดดและเลี่ยงแดดช่วง 10–15 น.',
   sun:'เวลาพระอาทิตย์ขึ้นและตก ตามเวลาท้องถิ่นของสถานที่ที่เลือก',
+  obs:'ตัวเลขใหญ่ด้านบนเป็นค่าประมาณจากแบบจำลองสำหรับทั้งพื้นที่ ส่วนบรรทัดนี้คือค่าที่เทอร์โมมิเตอร์วัดได้จริง ณ สถานีที่ใกล้ที่สุด แม่นที่จุดนั้น แต่ถ้าสถานีอยู่ไกลหรือคนละสภาพพื้นที่ (ในเมือง/บนดอย) ค่าจะต่างจากที่บ้านได้ อยากรู้ว่าตอนนี้ร้อนแค่ไหนจริงให้ดูบรรทัดนี้เมื่อสถานีอยู่ใกล้ อยากรู้แนวโน้มให้ดูพยากรณ์',
   aqi:'AQI คือดัชนีคุณภาพอากาศ มาตรฐานสหรัฐฯ แบบเดียวกับแอป IQAir ยิ่งต่ำยิ่งดี 0–50 อากาศดี / 51–100 พอใช้ / เกิน 100 เริ่มไม่ดี สีวงกลมบอกระดับ PM2.5 คือฝุ่นจิ๋วที่เข้าถึงปอดได้ หน่วย µg/m³'
 };
 
@@ -292,6 +297,7 @@ async function load(p){
   }
   setMap();
   drawFavs();
+  $('#obs').hidden = true;
   loadExtras(p);
   clearInterval(refreshTimer);
   refreshTimer = setInterval(() => load(place), 10 * 60 * 1000);
@@ -377,7 +383,7 @@ function render(w, a){
 
 /* ---------- คำอธิบายเมื่อแตะ ---------- */
 document.addEventListener('click', e => {
-  const b = e.target.closest('.stat, #airbox');
+  const b = e.target.closest('.stat, #airbox, #obs');
   if(!b) return;
   const key = b.dataset.key, box = $('#explain');
   const open = box.classList.contains('show') && box.dataset.key === key;
@@ -387,7 +393,7 @@ document.addEventListener('click', e => {
   box.textContent = EXPLAIN[key] + (key === 'wind' ? ' ' + box.dataset.extra : '');
   box.classList.add('show');
   if(b.classList.contains('stat')) b.setAttribute('aria-expanded', 'true');
-  if(key === 'aqi') $('#stats').after(box);
+  if(key === 'aqi' || key === 'obs') $('#stats').after(box);
 });
 
 /* ---------- แผนที่ Windy ---------- */
@@ -527,6 +533,11 @@ async function loadExtras(p){
   try{
     const { data:x } = await api('extras', { lat:p.lat, lon:p.lon, province:p.province || '' });
     if(my !== extrasSeq) return;
+    if(x.obs){
+      const o = x.obs, far = o.km > 25;
+      $('#obs').innerHTML = `📡 วัดจริง <b>${o.temp.toFixed(1)}°</b>${o.rh != null ? ' · ชื้น ' + Math.round(o.rh) + '%' : ''} <small>· ${esc(o.name)} ห่าง ${Math.round(o.km)} กม.${o.time ? ' · ' + esc(o.time) + ' น.' : ''}${far ? ' · ไกล ค่าอาจต่างจากพื้นที่จริง' : ''} ⓘ</small>`;
+      $('#obs').hidden = false;
+    }
     const rows = [];
     if(x.station){
       const c = pmColor(x.station.pm != null ? x.station.pm : (x.station.aqi <= 50 ? 5 : x.station.aqi <= 100 ? 20 : x.station.aqi <= 150 ? 45 : 90));
