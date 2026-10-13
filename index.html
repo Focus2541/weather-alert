@@ -445,8 +445,14 @@ async function reverseName(lat, lon){
   let name = 'ตำแหน่งของฉัน', region = '', province = '';
   try{
     const g = await getJSON(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=th`);
-    name = g.locality || g.city || g.principalSubdivision || name;
     province = g.principalSubdivision || '';
+    // หาชื่อตำบล (ระดับ 8) และอำเภอ (ระดับ 6) จากลำดับเขตปกครอง
+    const adm = (g.localityInfo && g.localityInfo.administrative) || [];
+    const lv = n => (adm.filter(a => a.adminLevel === n).pop() || {}).name || '';
+    const tambon = lv(8), amphoe = lv(6);
+    const short = s => s.replace(/^ตำบล\s*/, 'ต.').replace(/^แขวง\s*/, 'แขวง').replace(/^อำเภอ\s*/, 'อ.').replace(/^เขต\s*/, 'เขต');
+    if (tambon && amphoe && tambon !== amphoe) name = short(tambon) + ' ' + short(amphoe);
+    else name = g.locality || tambon || g.city || province || name;
     region = [province !== name ? province : '', g.countryName].filter(Boolean).join(', ');
   }catch(e){}
   return { name, region, province };
@@ -559,7 +565,7 @@ async function loadExtras(p){
 
 /* ---------- ตั้งค่าการแจ้งเตือน ---------- */
 const SET_ITEMS = [
-  ['pm','😷 ฝุ่นสูงตอนนี้'], ['pmForecast','📈 ฝุ่นจะสูงพรุ่งนี้'], ['rain','⛈️ ฝนหนัก / พายุ'], ['waterlog','💧 น้ำขังรอระบาย'], ['hot','🥵 ร้อนจัด'],
+  ['pm','😷 ฝุ่นสูงตอนนี้'], ['pmForecast','📈 ฝุ่นจะสูงพรุ่งนี้'], ['rainNow','🌧️ ฝนกำลังจะตก (ใกล้ตัว)'], ['rain','⛈️ ฝนหนัก / พายุ'], ['waterlog','💧 น้ำขังรอระบาย'], ['hot','🥵 ร้อนจัด'],
   ['cold','🥶 หนาว / เย็นลงฮวบ'], ['wind','💨 ลมแรง'], ['flood','🌊 น้ำท่วม / น้ำป่า'], ['fire','🔥 จุดไฟป่าใกล้ตัว'],
   ['quake','🌏 แผ่นดินไหว'], ['tmd','📢 ประกาศกรมอุตุฯ']
 ];
@@ -588,6 +594,9 @@ async function openSettings(){
           <option value="3" ${st.drain == 3 ? 'selected' : ''}>ขังยาก · เตือนที่ฝน ${thr(3)}</option>
         </select>
         ${waterAdj ? `<small class="muted" style="display:block;margin-top:4px">ระบบปรับจากคำตอบของคุณแล้ว ${waterAdj > 0 ? '+' : ''}${waterAdj} มม.</small>` : ''}</label>
+      <label class="sel">เริ่มเตือน "อากาศหนาว" เมื่อต่ำสุดพรุ่งนี้
+        <select name="coldAt">${[[20,'≤ 20°C · ไวมาก (คนขี้หนาว / กรุงเทพฯ)'],[18,'≤ 18°C · เริ่มเย็น (แนะนำ)'],[16,'≤ 16°C · หนาวตามเกณฑ์กรมอุตุฯ'],[14,'≤ 14°C · หนาวจริงจังเท่านั้น']]
+          .map(([v,l]) => `<option value="${v}" ${(st.coldAt ?? 18) == v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="sel">รัศมีตรวจจุดไฟป่า
         <select name="fireRadius">${[25,50,100].map(v => `<option value="${v}" ${st.fireRadius == v ? 'selected' : ''}>${v} กม.</option>`).join('')}</select></label>
       <label class="sel">ช่วงงดส่ง (แผ่นดินไหวแรงๆ ยังส่งเสมอ)
@@ -605,6 +614,7 @@ $('#setform').addEventListener('submit', async e => {
   if(f.get('aqi')) out.aqi = +f.get('aqi');
   if(f.get('fireRadius')) out.fireRadius = +f.get('fireRadius');
   if(f.get('drain')) out.drain = +f.get('drain');
+  if(f.get('coldAt')) out.coldAt = +f.get('coldAt');
   if(f.get('quiet')){ const [a, b] = f.get('quiet').split(',').map(Number); out.quietStart = a; out.quietEnd = b; }
   const btn = $('#setsave'); btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
   try{ await api('saveSettings', { settings:out }); btn.textContent = 'บันทึกแล้ว ✓'; setTimeout(() => $('#settings').close(), 700); }
