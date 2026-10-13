@@ -7,6 +7,8 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌤️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" defer></script>
 <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;600;700&family=Anuphan:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -138,6 +140,25 @@ legend{font-size:.85rem;color:var(--muted);padding:0 6px}
 .setactions{display:flex;gap:8px;justify-content:flex-end;padding-top:12px}
 .setactions button{border-radius:12px;padding:10px 18px;border:0;background:var(--steel);color:#fff;font-weight:600}
 .setactions .ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+/* ฝนจะตกเมื่อไร + เรดาร์ */
+.rain{margin-top:14px;background:var(--paper);border:1px solid var(--line);border-radius:20px;overflow:hidden}
+.rain-head{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;padding:14px 16px}
+.rain-icon{font-size:2.2rem;line-height:1}
+.rain-head b{font-family:var(--display);font-size:1.1rem;display:block;line-height:1.3}
+.rain-head span{font-size:.9rem;color:var(--muted)}
+.rbars{display:flex;align-items:flex-end;gap:3px;height:42px;padding:0 16px}
+.rbars i{flex:1;background:var(--steel);border-radius:3px 3px 0 0;min-height:2px;opacity:.85}
+.rbars i.dry{background:var(--line)}
+.rbars i.now{outline:2px solid var(--ink);outline-offset:1px}
+.raxis{display:flex;justify-content:space-between;padding:4px 16px 0;font-size:.72rem;color:var(--muted)}
+.rsrc{padding:6px 16px 12px;font-size:.75rem;color:var(--muted)}
+.radar-wrap{position:relative}
+#radar{width:100%;aspect-ratio:4/3.6;background:var(--sky)}
+@media (min-width:640px){#radar{aspect-ratio:16/10}}
+.radar-ctl{position:absolute;left:10px;bottom:10px;z-index:500;display:flex;align-items:center;gap:8px;background:rgba(19,48,58,.85);color:#fff;border-radius:999px;padding:4px 14px 4px 4px;font-family:var(--display);font-weight:600}
+.radar-ctl button{width:36px;height:36px;border-radius:50%;border:0;background:#fff;color:#13303A;font-size:.95rem}
+.radar-ctl small{font-weight:400;opacity:.8;font-family:var(--body)}
+.leaflet-container{font-family:var(--body)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 @media (max-width:380px){.stats{grid-template-columns:repeat(2,1fr)}}
 </style>
@@ -183,6 +204,18 @@ legend{font-size:.85rem;color:var(--muted);padding:0 6px}
   <div class="stats" id="stats"></div>
   <div class="explain" id="explain"></div>
   <div class="status" id="status"></div>
+
+  <section class="rain" id="rainbox" aria-live="polite">
+    <div class="rain-head"><div class="rain-icon" id="rainicon">🌂</div>
+      <div><b id="raintitle">กำลังดูฝน…</b><span id="rainsub"></span></div></div>
+    <div class="rbars" id="rbars"></div>
+    <div class="raxis"><span>ตอนนี้</span><span>+1 ชม.</span><span>+2 ชม.</span><span>+3 ชม.</span></div>
+    <div class="rsrc">พยากรณ์ราย 15 นาทีจากแบบจำลอง · อาจคลาดได้ราว ±30 นาที</div>
+    <div class="radar-wrap">
+      <div id="radar" role="img" aria-label="แผนที่เรดาร์ฝน"></div>
+      <div class="radar-ctl"><button id="radarplay" aria-label="เล่นภาพเรดาร์">▶</button><span id="radartime">ภาพฝน --:--</span></div>
+    </div>
+  </section>
 
   <section id="extras" hidden>
     <h2>รอบตัวคุณ</h2>
@@ -285,6 +318,7 @@ async function load(p){
     + `&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index`
     + `&hourly=temperature_2m,precipitation_probability,weather_code,is_day`
     + `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset`
+    + `&minutely_15=precipitation&past_minutely_15=1&forecast_minutely_15=13`
     + `&timezone=auto&forecast_days=7`;
   const a = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${p.lat}&longitude=${p.lon}`
     + `&current=us_aqi,pm2_5,pm10&hourly=pm2_5&timezone=auto&forecast_days=2`;
@@ -296,6 +330,7 @@ async function load(p){
     setStatus('โหลดข้อมูลไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต แล้วดึงหน้าลงหรือกดรีเฟรช', true);
   }
   setMap();
+  initRadar(p);
   drawFavs();
   $('#obs').hidden = true;
   loadExtras(p);
@@ -308,6 +343,7 @@ function setStatus(msg, err){ const s = $('#status'); s.textContent = msg; s.cla
 /* ---------- แสดงผล ---------- */
 function render(w, a){
   const c = w.current, d = w.daily, h = w.hourly;
+  try{ renderRain(w); }catch(e){ console.warn(e); }
   const nowIdx = Math.max(0, h.time.findIndex(t => t.slice(0,13) === c.time.slice(0,13)));
   const cond = wx(c.weather_code, c.is_day);
 
@@ -397,6 +433,84 @@ document.addEventListener('click', e => {
 });
 
 /* ---------- แผนที่ Windy ---------- */
+/* ---------- ฝนจะตกเมื่อไร (ราย 15 นาที) ---------- */
+const WET = 0.1;                                  // มม. ต่อ 15 นาที
+const hhmm = t => t.slice(11, 16);
+const rainWord = mmh => mmh < 2.5 ? 'ฝนเบา' : mmh < 10 ? 'ฝนปานกลาง' : mmh < 35 ? 'ฝนหนัก' : 'ฝนหนักมาก';
+const minsTxt = m => m < 60 ? `${m} นาที` : `${Math.floor(m / 60)} ชม.${m % 60 ? ' ' + (m % 60) + ' นาที' : ''}`;
+function renderRain(w){
+  const m = w.minutely_15;
+  if(!m || !m.precipitation){ $('#rainbox').hidden = true; return; }
+  $('#rainbox').hidden = false;
+  const now = w.current.time;
+  let i0 = 0;
+  m.time.forEach((t, i) => { if(t <= now) i0 = i; });
+  const p = m.precipitation.map(x => x || 0);
+  const next = p.slice(i0, i0 + 13);
+  const times = m.time.slice(i0, i0 + 13);
+  const diff = t => Math.max(0, Math.round((Date.parse(t) - Date.parse(now)) / 60000));
+  const peak = Math.max(...next) * 4;
+  let icon, title, sub;
+  if(next[0] >= WET){
+    let j = next.findIndex((x, k) => k > 0 && x < WET && (next[k + 1] ?? 0) < WET);
+    icon = peak >= 10 ? '⛈️' : '🌧️';
+    title = `ฝนตกอยู่ตอนนี้ · ${rainWord(next[0] * 4)}`;
+    sub = j > 0 ? `น่าจะหยุดราว ${hhmm(times[j])} น. (อีก ${minsTxt(diff(times[j]))})` : 'น่าจะตกต่อเนื่องอีกอย่างน้อย 3 ชั่วโมง';
+  } else {
+    const j = next.findIndex(x => x >= WET);
+    if(j > 0){
+      icon = peak >= 10 ? '⛈️' : '🌦️';
+      title = `ฝนจะเริ่มตกราว ${hhmm(times[j])} น.`;
+      sub = `อีก ${minsTxt(diff(times[j]))} · คาดว่า${rainWord(peak)}`;
+    } else {
+      icon = '🌂'; title = 'ไม่มีฝนใน 3 ชั่วโมงข้างหน้า'; sub = 'ออกไปข้างนอกได้สบาย';
+    }
+  }
+  $('#rainicon').textContent = icon; $('#raintitle').textContent = title; $('#rainsub').textContent = sub;
+  const top = Math.max(1.5, ...next);
+  $('#rbars').innerHTML = next.map((x, k) =>
+    `<i class="${x < WET ? 'dry' : ''}${k === 0 ? ' now' : ''}" style="height:${Math.max(4, Math.round(x / top * 100))}%" title="${hhmm(times[k])} น. · ${(x * 4).toFixed(1)} มม./ชม."></i>`).join('');
+}
+
+/* ---------- เรดาร์ฝนสด (RainViewer) ---------- */
+let radar = null, radarDot = null, radarRing = null, radarLayers = [], radarFrames = [], radarIdx = 0, radarTimer = null;
+async function initRadar(p){
+  if(!window.L){ setTimeout(() => initRadar(p), 400); return; }
+  if(!radar){
+    radar = L.map('radar', { zoomControl:false, attributionControl:true, scrollWheelZoom:false }).setView([p.lat, p.lon], 8);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      { attribution:'© OpenStreetMap © CARTO', maxZoom:11, minZoom:5 }).addTo(radar);
+    radarRing = L.circle([p.lat, p.lon], { radius:10000, color:'#13303A', weight:1.5, dashArray:'5 6', fill:false }).addTo(radar);
+    radarDot = L.circleMarker([p.lat, p.lon], { radius:7, color:'#fff', weight:3, fillColor:'#E5674B', fillOpacity:1 }).addTo(radar);
+    $('#radarplay').addEventListener('click', toggleRadar);
+  } else {
+    radar.setView([p.lat, p.lon], radar.getZoom());
+    radarDot.setLatLng([p.lat, p.lon]); radarRing.setLatLng([p.lat, p.lon]);
+  }
+  try{
+    const j = await getJSON('https://api.rainviewer.com/public/weather-maps.json');
+    const frames = [...(j.radar.past || []), ...((j.radar.nowcast) || []).map(f => ({ ...f, fc:true }))];
+    radarLayers.forEach(l => radar.removeLayer(l));
+    radarFrames = frames;
+    radarLayers = frames.map(f => L.tileLayer(`${j.host}${f.path}/256/{z}/{x}/{y}/2/1_0.png`,
+      { opacity:0, maxNativeZoom:7, maxZoom:11, attribution:'เรดาร์ <a href="https://www.rainviewer.com" target="_blank" rel="noopener">RainViewer</a>' }).addTo(radar));
+    radarIdx = (j.radar.past || []).length - 1;
+    showRadar(radarIdx);
+  }catch(e){ $('#radartime').textContent = 'โหลดเรดาร์ไม่สำเร็จ'; }
+}
+function showRadar(i){
+  if(!radarLayers.length) return;
+  radarLayers.forEach((l, k) => l.setOpacity(k === i ? .72 : 0));
+  const f = radarFrames[i];
+  const t = new Date(f.time * 1000).toLocaleTimeString('th-TH', { hour:'2-digit', minute:'2-digit' });
+  $('#radartime').innerHTML = `ภาพฝน ${t} <small>${f.fc ? '· คาดการณ์' : i === radarFrames.length - 1 || !radarFrames[i + 1] || radarFrames[i + 1].fc ? '· ล่าสุด' : ''}</small>`;
+}
+function toggleRadar(){
+  if(radarTimer){ clearInterval(radarTimer); radarTimer = null; $('#radarplay').textContent = '▶'; return; }
+  $('#radarplay').textContent = '❚❚';
+  radarTimer = setInterval(() => { radarIdx = (radarIdx + 1) % radarLayers.length; showRadar(radarIdx); }, 700);
+}
+
 function setMap(){
   if(!place) return;
   const p = new URLSearchParams({
